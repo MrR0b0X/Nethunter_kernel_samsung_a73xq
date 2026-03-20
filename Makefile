@@ -877,7 +877,11 @@ endif
 ifdef CONFIG_AS_IS_LLVM
 KBUILD_AFLAGS	+= -g
 else
+ifdef CONFIG_DEBUG_INFO_DWARF4
+KBUILD_AFLAGS	+= -Wa,-gdwarf-4
+else
 KBUILD_AFLAGS	+= -Wa,-gdwarf-2
+endif
 endif
 endif
 
