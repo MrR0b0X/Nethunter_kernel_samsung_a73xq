@@ -1,0 +1,72 @@
+name: MT7921AU backport build
+
+on:
+  push:
+    branches:
+      - 'backport/mt7921au-5.4'
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout kernel
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bc bison flex libssl-dev libelf-dev \
+            gcc-aarch64-linux-gnu git make ccache python3
+
+      - name: Fetch 5.10 mt76 backport base
+        run: |
+          git clone --depth=1 https://github.com/shengliangd/mt76-backport.git /tmp/mt76-backport
+
+      - name: Import mt76/mt7921u backport
+        run: |
+          rm -rf /tmp/kernel-mt76-original
+          cp -a drivers/net/wireless/mediatek/mt76 /tmp/kernel-mt76-original
+          rm -rf drivers/net/wireless/mediatek/mt76
+          cp -a /tmp/mt76-backport drivers/net/wireless/mediatek/mt76
+
+      - name: Generate minimal arm64 config
+        run: |
+          make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- defconfig
+          scripts/config --enable CONFIG_WLAN
+          scripts/config --enable CONFIG_CFG80211
+          scripts/config --enable CONFIG_MAC80211
+          scripts/config --module CONFIG_MT76_CORE
+          scripts/config --module CONFIG_MT76_USB
+          scripts/config --module CONFIG_MT76_CONNAC_LIB
+          scripts/config --module CONFIG_MT7921_COMMON
+          scripts/config --module CONFIG_MT7921U
+          make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- olddefconfig
+
+      - name: Build mt76 modules
+        run: |
+          make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- -j$(nproc) \
+            M=drivers/net/wireless/mediatek/mt76 modules
+
+      - name: Generate kernel patch
+        run: |
+          git add -A drivers/net/wireless/mediatek/mt76
+          git diff --cached --binary --full-index -- drivers/net/wireless/mediatek/mt76 > mt7921au-backport.patch
+          printf '\nPatch generated from the 5.4 kernel tree.\n' >> /dev/null
+          test -s mt7921au-backport.patch
+
+      - name: Collect modules
+        run: |
+          mkdir -p artifacts/modules
+          find drivers/net/wireless/mediatek/mt76 -name '*.ko' -exec cp -v {} artifacts/modules/ \;
+          cp mt7921au-backport.patch artifacts/
+          sha256sum artifacts/mt7921au-backport.patch artifacts/modules/*.ko | tee artifacts/SHA256SUMS
+
+      - name: Upload backport patch and modules
+        uses: actions/upload-artifact@v4
+        with:
+          name: mt7921au-backport-5.4
+          path: artifacts/
+          if-no-files-found: error
