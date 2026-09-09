@@ -45,6 +45,11 @@ jobs:
           scripts/config --module CONFIG_MT7921U
           make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- olddefconfig
 
+      - name: Prepare kernel build infrastructure
+        run: |
+          make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- prepare
+          make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- modules_prepare
+
       - name: Build mt76 modules
         run: |
           make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- -j$(nproc) \
@@ -54,7 +59,6 @@ jobs:
         run: |
           git add -A drivers/net/wireless/mediatek/mt76
           git diff --cached --binary --full-index -- drivers/net/wireless/mediatek/mt76 > mt7921au-backport.patch
-          printf '\nPatch generated from the 5.4 kernel tree.\n' >> /dev/null
           test -s mt7921au-backport.patch
 
       - name: Collect modules
