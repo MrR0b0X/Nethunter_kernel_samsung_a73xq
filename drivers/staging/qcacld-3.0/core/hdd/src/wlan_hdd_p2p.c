@@ -726,9 +726,17 @@ struct wireless_dev *__wlan_hdd_add_virtual_intf(struct wiphy *wiphy,
 	if (ret)
 		return ERR_PTR(ret);
 
-	if (policy_mgr_is_sta_mon_concurrency(hdd_ctx->psoc))
-		return ERR_PTR(-EINVAL);
-
+	/*
+	 * Do not reject VIF creation just because a STA + monitor pair is
+	 * already up. Creating a VIF only allocates a netdev/adapter; the
+	 * per-type limits are still enforced where the resource is really
+	 * consumed: policy_mgr_check_mon_concurrency() for monitor VIFs,
+	 * hdd_open_adapter() (WLAN_MAX_VDEVS, STA vdev count), the vdev
+	 * sync pool, and the vdev create/start path (firmware).
+	 *
+	 * Packet-capture monitor is a different feature that owns the
+	 * STA + monitor pair, so keep rejecting while it is active.
+	 */
 	if (wlan_hdd_is_mon_concurrency())
 		return ERR_PTR(-EINVAL);
 
