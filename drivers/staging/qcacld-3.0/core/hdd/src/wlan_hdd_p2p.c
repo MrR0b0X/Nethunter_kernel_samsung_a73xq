@@ -1137,6 +1137,27 @@ int wlan_hdd_del_virtual_intf(struct wiphy *wiphy, struct wireless_dev *wdev)
 	osif_vdev_sync_destroy(vdev_sync);
 
 	if (!errno && restore_station) {
+		struct hdd_adapter *sta_adapter =
+			hdd_get_adapter(hdd_ctx, QDF_STA_MODE);
+
+		/*
+		 * hdd_queue_monitor_station_restore() only acts when
+		 * monitor_restore_pending/monitor_restore_iface are set.
+		 * hdd_preserve_station_for_monitor() sets them, but it is
+		 * only reached by trying to delete the STA adapter while a
+		 * monitor adapter is up -- never by the normal path of
+		 * deleting the monitor adapter itself (e.g. "iw wlan0mon
+		 * del"), so on that path the queued work used to find
+		 * nothing pending and do nothing, leaving the STA adapter
+		 * disconnected with no restore attempt. Set the same state
+		 * here so the existing (already RTNL-safe) restore work
+		 * actually runs for this path too.
+		 */
+		if (sta_adapter) {
+			strscpy(hdd_ctx->monitor_restore_iface,
+				sta_adapter->dev->name, IFNAMSIZ);
+			hdd_ctx->monitor_restore_pending = true;
+		}
 		hdd_queue_monitor_station_restore(hdd_ctx);
 	}
 	return errno;
