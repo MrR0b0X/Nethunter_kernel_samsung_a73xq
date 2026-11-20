@@ -32527,10 +32527,63 @@ static int msm_voc_session_id_get(struct snd_kcontrol *kcontrol,
 	return 0;
 }
 
+/* One-shot vocproc recovery; no audioserver restart or persistent enable flag. */
+static DEFINE_MUTEX(avcrt_cvp_rebuild_lock);
+
+static int msm_routing_avcrt_cvp_rebuild_get(struct snd_kcontrol *kcontrol,
+					 struct snd_ctl_elem_value *ucontrol)
+{
+	ucontrol->value.integer.value[0] = 0;
+	return 0;
+}
+
+static int msm_routing_avcrt_cvp_rebuild_put(struct snd_kcontrol *kcontrol,
+					 struct snd_ctl_elem_value *ucontrol)
+{
+	static const char * const sessions[] = {
+		VOICEMMODE1_NAME, VOICEMMODE2_NAME, VOLTE_SESSION_NAME,
+		VOICE_SESSION_NAME, VOICE2_SESSION_NAME, VOWLAN_SESSION_NAME,
+	};
+	int i, ret, first_error = 0;
+
+	if (!ucontrol->value.integer.value[0])
+		return 0;
+	if (ucontrol->value.integer.value[0] != 1)
+		return -EINVAL;
+
+	mutex_lock(&avcrt_cvp_rebuild_lock);
+	for (i = 0; i < ARRAY_SIZE(sessions); i++) {
+		uint32_t sid = voc_get_session_id((char *)sessions[i]);
+
+		if (!sid)
+			continue;
+		/* q6voice serializes each operation and skips idle sessions. */
+		ret = voc_disable_device(sid);
+		if (!ret)
+			ret = voc_enable_device(sid);
+		if (ret < 0) {
+			pr_err("AVCRT: CVP rebuild failed for session '%s' (0x%x): %d\n",
+			       sessions[i], sid, ret);
+			if (!first_error)
+				first_error = ret;
+		} else {
+			/* Success may be a no-op for an idle voice session. */
+			pr_info("AVCRT: CVP rebuild request for session '%s' (0x%x) completed\n",
+				sessions[i], sid);
+		}
+	}
+	mutex_unlock(&avcrt_cvp_rebuild_lock);
+
+	return first_error;
+}
+
 static struct snd_kcontrol_new msm_voc_session_controls[] = {
 	SOC_SINGLE_MULTI_EXT("Voc VSID", SND_SOC_NOPM, 0,
 			     0xFFFFFFFF, 0, 1, msm_voc_session_id_get,
 			     msm_voc_session_id_put),
+	SOC_SINGLE_EXT("AVCRT CVP Rebuild", SND_SOC_NOPM, 0, 1, 0,
+		       msm_routing_avcrt_cvp_rebuild_get,
+		       msm_routing_avcrt_cvp_rebuild_put),
 };
 
 static int msm_sound_focus_info(struct snd_kcontrol *kcontrol,

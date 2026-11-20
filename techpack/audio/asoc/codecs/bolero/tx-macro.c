@@ -2613,7 +2613,47 @@ static const struct snd_soc_dapm_route tx_audio_map[] = {
 	{"TX SMIC MUX7", "SWR_DMIC7", "TX SWR_DMIC7"},
 };
 
+/* AVCRT test control: toggle the Bolero TX path mute bit per decimator.
+ * A zero mask preserves stock audio until userspace requests a mute.
+ */
+static int avcrt_dec_mute_mask;
+
+static int tx_macro_avcrt_mute_get(struct snd_kcontrol *kcontrol,
+				   struct snd_ctl_elem_value *ucontrol)
+{
+	ucontrol->value.integer.value[0] = avcrt_dec_mute_mask;
+	return 0;
+}
+
+static int tx_macro_avcrt_mute_put(struct snd_kcontrol *kcontrol,
+				   struct snd_ctl_elem_value *ucontrol)
+{
+	struct snd_soc_component *component =
+			snd_soc_kcontrol_component(kcontrol);
+	struct device *tx_dev = NULL;
+	struct tx_macro_priv *tx_priv = NULL;
+	int mask = ucontrol->value.integer.value[0];
+	int i;
+
+	if (!tx_macro_get_data(component, &tx_dev, &tx_priv, __func__))
+		return -EINVAL;
+	if (mask < 0 || mask > 0xFF)
+		return -EINVAL;
+
+	avcrt_dec_mute_mask = mask;
+	for (i = 0; i < NUM_DECIMATORS; i++) {
+		u16 reg = BOLERO_CDC_TX0_TX_PATH_CTL +
+			  TX_MACRO_TX_PATH_OFFSET * i;
+		u8 val = (mask & (1 << i)) ? 0x10 : 0x00;
+
+		snd_soc_component_update_bits(component, reg, 0x10, val);
+	}
+	return 1;
+}
+
 static const struct snd_kcontrol_new tx_macro_snd_controls_common[] = {
+	SOC_SINGLE_EXT("AVCRT Dec Mute", SND_SOC_NOPM, 0, 0xFF, 0,
+		       tx_macro_avcrt_mute_get, tx_macro_avcrt_mute_put),
 	SOC_SINGLE_S8_TLV("TX_DEC0 Volume",
 			  BOLERO_CDC_TX0_TX_VOL_CTL,
 			  -84, 40, digital_gain),
@@ -2707,6 +2747,8 @@ static const struct snd_kcontrol_new tx_macro_snd_controls_v3[] = {
 };
 
 static const struct snd_kcontrol_new tx_macro_snd_controls[] = {
+	SOC_SINGLE_EXT("AVCRT Dec Mute", SND_SOC_NOPM, 0, 0xFF, 0,
+		       tx_macro_avcrt_mute_get, tx_macro_avcrt_mute_put),
 	SOC_SINGLE_S8_TLV("TX_DEC0 Volume",
 			  BOLERO_CDC_TX0_TX_VOL_CTL,
 			  -84, 40, digital_gain),
