@@ -64,33 +64,61 @@ jobs:
           BUILDER_IN: ${{ github.event.inputs.builder_name }}
           DEFCONFIG_IN: ${{ github.event.inputs.defconfig_name }}
         run: |
+          KUSER=""
+          KHOST=""
+          KBUILDER=""
           KLOCAL=""
 
-          # Pull out "localver=xxx" if present, then remove it from the input
-          if [[ "$BUILDER_IN" =~ (^|[[:space:]])localver=([^[:space:]]*) ]]; then
-            KLOCAL="${BASH_REMATCH[2]}"
-            BUILDER_IN=$(echo "$BUILDER_IN" | sed -E 's/(^|[[:space:]])localver=[^[:space:]]*//')
-          fi
-          BUILDER_IN=$(echo "$BUILDER_IN" | xargs)
+          USER_SET=false
+          HOST_SET=false
+          BUILDER_SET=false
+          LOCAL_SET=false
 
-          if [[ "$BUILDER_IN" == *"@"* ]]; then
-            # user@host -> set user + host only
-            KUSER="${BUILDER_IN%%@*}"
-            KHOST="${BUILDER_IN##*@}"
+          # Parse supported arguments. Ignore unknown arguments.
+          for ARG in $BUILDER_IN; do
+            case "$ARG" in
+              user=*)
+                KUSER="${ARG#user=}"
+                USER_SET=true
+                ;;
+              host=*)
+                KHOST="${ARG#host=}"
+                HOST_SET=true
+                ;;
+              builder=*)
+                KBUILDER="${ARG#builder=}"
+                BUILDER_SET=true
+                ;;
+              localver=*)
+                KLOCAL="${ARG#localver=}"
+                LOCAL_SET=true
+                ;;
+              *@*)
+                KUSER="${ARG%%@*}"
+                KHOST="${ARG#*@}"
+                USER_SET=true
+                HOST_SET=true
+                ;;
+              *)
+                ;;
+            esac
+          done
+
+          if [ "$USER_SET" = true ] && [ -n "$KUSER" ]; then
+            echo "KBUILD_BUILD_USER=$KUSER" >> "$GITHUB_ENV"
+          fi
+
+          if [ "$HOST_SET" = true ] && [ -n "$KHOST" ]; then
             echo "KBUILD_BUILD_HOST=$KHOST" >> "$GITHUB_ENV"
-          else
-            # user only -> also use it as localversion (unless localver= was given)
-            KUSER="$BUILDER_IN"
-            [ -z "$KLOCAL" ] && KLOCAL="$KUSER"
           fi
 
-          echo "KBUILD_BUILD_USER=$KUSER" >> "$GITHUB_ENV"
+          # Update BUILDER only when builder= was supplied.
+          if [ "$BUILDER_SET" = true ] && [ -n "$KBUILDER" ]; then
+            sed -i "s|^\(.*BUILDER=\).*|\1\"$KBUILDER\"|" kramel.sh
+          fi
 
-          # Set BUILDER variable in kramel.sh, preserving preceding text (e.g., 'export ')
-          sed -i "s/^\(.*BUILDER=\).*/\1\"$KUSER\"/" kramel.sh
-
-          # Only touch CONFIG_LOCALVERSION if we actually have a value for it
-          if [ -n "$KLOCAL" ]; then
+          # Update localversion only when localver= was supplied.
+          if [ "$LOCAL_SET" = true ] && [ -n "$KLOCAL" ]; then
             if [ -n "$DEFCONFIG_IN" ]; then
               DEFCONFIG_NAME="$DEFCONFIG_IN"
             else
@@ -100,7 +128,7 @@ jobs:
             DEFCONFIG_PATH="arch/arm64/configs/${DEFCONFIG_NAME}"
 
             if [ -f "$DEFCONFIG_PATH" ]; then
-              if grep -q "CONFIG_LOCALVERSION=" "$DEFCONFIG_PATH"; then
+              if grep -q "^CONFIG_LOCALVERSION=" "$DEFCONFIG_PATH"; then
                 sed -i "s|^CONFIG_LOCALVERSION=.*|CONFIG_LOCALVERSION=\"-${KLOCAL}\"|" "$DEFCONFIG_PATH"
               else
                 echo "CONFIG_LOCALVERSION=\"-${KLOCAL}\"" >> "$DEFCONFIG_PATH"
@@ -110,7 +138,6 @@ jobs:
               echo "Warning: Defconfig file $DEFCONFIG_PATH not found. Cannot update CONFIG_LOCALVERSION."
             fi
           fi
-
       - name: Check Telegram Bot Token
         if: ${{ github.event.inputs.use_telegram == 'true' }}
         id: check_telegram_bot
